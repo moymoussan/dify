@@ -1,30 +1,36 @@
 # syntax=docker/dockerfile:1
-FROM python:3.10-slim-bullseye
 
-# Install system dependencies
+### Stage 1: Build dependencies
+FROM python:3.10-slim-bullseye AS build
+
+# Install only what's needed to compile wheels
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
     gcc \
-    curl \
     build-essential \
     libpq-dev \
     libffi-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user (optional but recommended)
-RUN useradd -ms /bin/bash appuser
-USER appuser
-WORKDIR /home/appuser
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Copy code
-COPY --chown=appuser:appuser . .
+COPY . .
 
-# Install Python dependencies
-# Adjust to your needs: pip install -r requirements.txt, poetry, etc.
-RUN pip install --no-cache-dir -r requirements.txt
+### Stage 2: Final runtime
+FROM python:3.10-slim-bullseye
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev \
+ && rm -rf /var/lib/apt/lists/*
 
-# Expose the port that your app listens on
+# Copy installed Python packages from Stage 1
+COPY --from=build /root/.local /root/.local
+
+WORKDIR /app
+COPY . .
+
+# Adjust if you install packages globally:
+ENV PATH=/root/.local/bin:$PATH
+
 EXPOSE 8000
-
-# Run the app
 CMD ["python", "main.py"]
