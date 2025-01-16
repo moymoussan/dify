@@ -1,0 +1,18 @@
+# railway.toml
+[service]
+name = "dify"
+# Set or override environment variables as needed
+# For example, you must point Dify to a PostgreSQL database:
+envs = { 
+  "DATABASE_URL" = "{{ Railway Postgres Connection String }}",
+  # Dify might need other envs (REDIS_URL, etc.) if used
+  "PORT" = "8080"
+}
+
+[service.deploy]
+# Use Dockerfile-based deployment
+builder = "DOCKER"
+dockerfilePath = "./Dockerfile"
+# Optionally override build & start commands if you want, but 
+# Dockerfile's CMD should suffice.
+
