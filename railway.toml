@@ -1,18 +1,252 @@
 # railway.toml
-[service]
-name = "dify"
-# Set or override environment variables as needed
-# For example, you must point Dify to a PostgreSQL database:
-envs = { 
-  "DATABASE_URL" = "{{ Railway Postgres Connection String }}",
-  # Dify might need other envs (REDIS_URL, etc.) if used
-  "PORT" = "8080"
-}
 
-[service.deploy]
-# Use Dockerfile-based deployment
-builder = "DOCKER"
-dockerfilePath = "./Dockerfile"
-# Optionally override build & start commands if you want, but 
-# Dockerfile's CMD should suffice.
+[project]
+name = "Dify"
 
+##
+# 1) Web
+##
+[[services]]
+name = "Web"
+image = "langgenius/dify-web"
+# The environment variables from your screenshot:
+[services.env]
+HOST = "${{RAILWAY_PUBLIC_DOMAIN}}"
+PORT = "3000"
+HOSTNAME = "::"
+APP_API_URL = "https://${{Api.HOST}}"
+CONSOLE_API_URL = "https://${{Api.HOST}}"
+
+# We don't need volumes here, so no volumes block for Web.
+
+##
+# 2) Sandbox
+##
+[[services]]
+name = "Sandbox"
+image = "langgenius/dify-sandbox"
+
+[services.env]
+PORT = "8194"
+PRIVATE_HOST = "${{RAILWAY_PRIVATE_DOMAIN}}"
+SANDBOX_PORT = "8194"
+SANDBOX_API_KEY = "${{secret(16)}}"
+SANDBOX_GIN_MODE = "release"
+SANDBOX_ENABLE_NETWORK = "true"
+SANDBOX_WORKER_TIMEOUT = "15"
+
+# Example of adding a volume for /dependencies:
+[[services.volumes]]
+mountPath = "/dependencies"
+name = "sandbox-dependencies"
+
+##
+# 3) Redis
+##
+[[services]]
+name = "Redis"
+image = "redis:6-alpine"
+
+[services.env]
+REDISHOST = "${{RAILWAY_TCP_PROXY_DOMAIN}}"
+REDISPORT = "${{RAILWAY_TCP_PROXY_PORT}}"
+REDISUSER = "default"
+REDIS_URL = "redis://default:${{REDIS_PASSWORD}}@${{RAILWAY_TCP_PROXY_DOMAIN}}:${{RAILWAY_TCP_PROXY_PORT}}"
+REDIS_PASSWORD = "${{secret(32, \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_!~*\")}}"
+RAILWAY_RUN_UID = "0"
+REDISHOST_PRIVATE = "${{RAILWAY_PRIVATE_DOMAIN}}"
+REDISPORT_PRIVATE = "6379"
+REDIS_PRIVATE_URL = "redis://${{REDISUSER}}:${{REDIS_PASSWORD}}@${{REDISHOST_PRIVATE}}:${{REDISPORT_PRIVATE}}"
+
+[[services.volumes]]
+mountPath = "/data"
+name = "redis-data"
+
+##
+# 4) Storage console (MinIO console)
+##
+[[services]]
+name = "Storage console"
+image = "railwayapp-templates/minio-console"
+
+[services.env]
+PORT = "9090"
+PASSWORD = "${{Storage.MINIO_ROOT_PASSWORD}}"
+USERNAME = "${{Storage.MINIO_ROOT_USER}}"
+CONSOLE_MINIO_SERVER = "${{Storage.MINIO_PRIVATE_ENDPOINT}}"
+
+##
+# 5) Api (Dify API)
+##
+[[services]]
+name = "Api"
+image = "langgenius/dify-api"
+
+[services.env]
+HOST = "${{RAILWAY_PUBLIC_DOMAIN}}"
+MODE = "api"
+PORT = "5001"
+DB_HOST = "${{Postgres.PGHOST_PRIVATE}}"
+DB_PORT = "${{Postgres.PGPORT_PRIVATE}}"
+REDIS_DB = "0"
+FILES_URL = "https://${{HOST}}"
+LOG_LEVEL = "INFO"
+S3_REGION = "auto"
+REDIS_HOST = "${{Redis.REDISHOST_PRIVATE}}"
+REDIS_PORT = "${{Redis.REDISPORT_PRIVATE}}"
+SECRET_KEY = "${{secret()}}"
+APP_WEB_URL = "https://${{Web.HOST}}"
+DB_DATABASE = "${{Postgres.POSTGRES_DB}}"
+DB_PASSWORD = "${{Postgres.POSTGRES_PASSWORD}}"
+DB_USERNAME = "${{Postgres.POSTGRES_USER}}"
+S3_ENDPOINT = "${{Storage.MINIO_PRIVATE_ENDPOINT}}"
+STORAGE_TYPE = "s3"
+VECTOR_STORE = "weaviate"
+INIT_PASSWORD = "${{secret(16)}}"
+S3_ACCESS_KEY = "${{Storage.MINIO_ROOT_USER}}"
+S3_SECRET_KEY = "${{Storage.MINIO_ROOT_PASSWORD}}"
+REDIS_PASSWORD = "${{Redis.REDIS_PASSWORD}}"
+REDIS_USERNAME = "${{Redis.REDISUSER}}"
+S3_BUCKET_NAME = "${{Storage.MINIO_BUCKET}}"
+CONSOLE_API_URL = "https://${{HOST}}"
+CONSOLE_WEB_URL = "https://${{Web.HOST}}"
+SERVICE_API_URL = "https://${{HOST}}"
+WEAVIATE_API_KEY = "${{Weaviate.AUTHENTICATION_APIKEY_ALLOWED_KEYS}}"
+CELERY_BROKER_URL = "${{Redis.REDIS_PRIVATE_URL}}/1"
+DIFY_BIND_ADDRESS = "[::]"
+MIGRATION_ENABLED = "true"
+WEAVIATE_ENDPOINT = "http://${{Weaviate.PRIVATE_HOST}}:8080"
+CODE_EXECUTION_ENDPOINT = "http://${{Sandbox.PRIVATE_HOST}}:8194"
+CONSOLE_CORS_ALLOW_ORIGINS = "https://${{Web.RAILWAY_PUBLIC_DOMAIN}},*"
+WEB_API_CORS_ALLOW_ORIGINS = "https://${{Web.RAILWAY_PUBLIC_DOMAIN}},*"
+
+##
+# 6) Weaviate
+##
+[[services]]
+name = "Weaviate"
+image = "semitechnologies/weaviate"
+
+[services.env]
+PORT = "8080"
+PRIVATE_HOST = "${{RAILWAY_PRIVATE_DOMAIN}}"
+CLUSTER_HOSTNAME = "node1"
+QUERY_DEFAULTS_LIMIT = "25"
+PERSISTENCE_DATA_PATH = "/var/lib/weaviate"
+DEFAULT_VECTORIZER_MODULE = "none"
+AUTHENTICATION_APIKEY_USERS = "${{secret()}}@dify.ai"
+AUTHENTICATION_APIKEY_ENABLED = "true"
+AUTHORIZATION_ADMINLIST_USERS = "${{Weaviate.AUTHENTICATION_APIKEY_USERS}}"
+AUTHORIZATION_ADMINLIST_ENABLED = "true"
+AUTHENTICATION_APIKEY_ALLOWED_KEYS = "${{secret()}}"
+AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED = "false"
+
+[[services.volumes]]
+mountPath = "/var/lib/weaviate"
+name = "weaviate-data"
+
+##
+# 7) Worker (Dify Worker)
+##
+[[services]]
+name = "Worker"
+image = "langgenius/dify-api"
+
+[services.env]
+MODE = "worker"
+PORT = "5001"
+DB_HOST = "${{Postgres.PGHOST_PRIVATE}}"
+DB_PORT = "${{Postgres.PGPORT_PRIVATE}}"
+REDIS_DB = "${{Api.REDIS_DB}}"
+FILES_URL = "https://${{Api.HOST}}"
+LOG_LEVEL = "${{Api.LOG_LEVEL}}"
+S3_REGION = "auto"
+REDIS_HOST = "${{Redis.REDISHOST_PRIVATE}}"
+REDIS_PORT = "${{Redis.REDISPORT_PRIVATE}}"
+SECRET_KEY = "${{Api.SECRET_KEY}}"
+APP_WEB_URL = "https://${{Web.HOST}}"
+DB_DATABASE = "${{Postgres.POSTGRES_DB}}"
+DB_PASSWORD = "${{Postgres.POSTGRES_PASSWORD}}"
+DB_USERNAME = "${{Postgres.POSTGRES_USER}}"
+S3_ENDPOINT = "${{Storage.MINIO_PRIVATE_ENDPOINT}}"
+STORAGE_TYPE = "s3"
+VECTOR_STORE = "weaviate"
+S3_ACCESS_KEY = "${{Storage.MINIO_ROOT_USER}}"
+S3_SECRET_KEY = "${{Storage.MINIO_ROOT_PASSWORD}}"
+REDIS_PASSWORD = "${{Redis.REDIS_PASSWORD}}"
+REDIS_USERNAME = "${{Redis.REDISUSER}}"
+S3_BUCKET_NAME = "${{Storage.MINIO_BUCKET}}"
+CONSOLE_API_URL = "https://${{Api.HOST}}"
+CONSOLE_WEB_URL = "https://${{Web.HOST}}"
+SERVICE_API_URL = "https://${{Api.HOST}}"
+WEAVIATE_API_KEY = "${{Weaviate.AUTHENTICATION_APIKEY_ALLOWED_KEYS}}"
+CELERY_BROKER_URL = "${{Redis.REDIS_PRIVATE_URL}}/1"
+MIGRATION_ENABLED = "${{Api.MIGRATION_ENABLED}}"
+WEAVIATE_ENDPOINT = "http://${{Weaviate.PRIVATE_HOST}}:8080"
+CODE_EXECUTION_ENDPOINT = "http://${{Sandbox.PRIVATE_HOST}}:8194"
+CONSOLE_CORS_ALLOW_ORIGINS = "https://${{Web.RAILWAY_PUBLIC_DOMAIN}},*"
+WEB_API_CORS_ALLOW_ORIGINS = "https://${{Web.RAILWAY_PUBLIC_DOMAIN}},*"
+
+##
+# 8) Postgres
+##
+[[services]]
+name = "Postgres"
+image = "postgres:15-alpine"
+
+[services.env]
+PGDATA = "/var/lib/postgresql/data/pgdata"
+PGHOST = "${{RAILWAY_TCP_PROXY_DOMAIN}}"
+PGPORT = "${{RAILWAY_TCP_PROXY_PORT}}"
+POSTGRES_DB = "railway"
+DATABASE_URL = "postgres://${{POSTGRES_USER}}:${{POSTGRES_PASSWORD}}@${{PGHOST}}:${{PGPORT}}/${{POSTGRES_DB}}"
+POSTGRES_USER = "railway"
+SSL_CERT_DAYS = "820"
+PGHOST_PRIVATE = "${{RAILWAY_PRIVATE_DOMAIN}}"
+PGPORT_PRIVATE = "5432"
+POSTGRES_PASSWORD = "${{secret(32, \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_!~*\")}}"
+DATABASE_PRIVATE_URL = "postgres://${{POSTGRES_USER}}:${{POSTGRES_PASSWORD}}@${{PGHOST_PRIVATE}}:${{PGPORT_PRIVATE}}/${{POSTGRES_DB}}"
+
+[[services.volumes]]
+mountPath = "/var/lib/postgresql/data"
+name = "postgres-data"
+
+##
+# 9) Storage provision (MinIO/mc)
+##
+[[services]]
+name = "Storage provision"
+image = "minio/mc"
+
+[services.env]
+MINIO_BUCKET = "${{Storage.MINIO_BUCKET}}"
+MINIO_ENDPOINT = "${{Storage.MINIO_PRIVATE_ENDPOINT}}"
+MINIO_ROOT_USER = "${{Storage.MINIO_ROOT_USER}}"
+MINIO_ROOT_PASSWORD = "${{Storage.MINIO_ROOT_PASSWORD}}"
+
+# Typically runs once to provision the bucket. 
+# Some people remove this service after provisioning is complete.
+
+##
+# 10) Storage (MinIO)
+##
+[[services]]
+name = "Storage"
+image = "minio/minio"
+
+[services.env]
+PORT = "${{MINIO_PRIVATE_PORT}}"
+MINIO_BUCKET = "difyai"
+MINIO_ROOT_USER = "${{secret(32, \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\")}}"
+MINIO_PUBLIC_HOST = "${{RAILWAY_PUBLIC_DOMAIN}}"
+MINIO_PUBLIC_PORT = "443"
+MINIO_PRIVATE_HOST = "${{RAILWAY_PRIVATE_DOMAIN}}"
+MINIO_PRIVATE_PORT = "9000"
+MINIO_ROOT_PASSWORD = "${{secret(48, \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\")}}"
+MINIO_PUBLIC_ENDPOINT = "https://${{MINIO_PUBLIC_HOST}}:${{MINIO_PUBLIC_PORT}}"
+MINIO_PRIVATE_ENDPOINT = "http://${{MINIO_PRIVATE_HOST}}:${{MINIO_PRIVATE_PORT}}"
+MINIO_BROWSER_REDIRECT_URL = "https://${{\"Storage console\".RAILWAY_PUBLIC_DOMAIN}}"
+
+[[services.volumes]]
+mountPath = "/data"
+name = "minio-data"
